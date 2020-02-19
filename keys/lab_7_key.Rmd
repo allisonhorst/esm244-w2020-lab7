@@ -15,6 +15,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ```{r}
 # General packages for stuff
 library(tidyverse)
+library(here)
 library(janitor)
 library(plotly)
 
@@ -24,6 +25,7 @@ library(sf)
 library(spatstat)
 library(maptools)
 library(sp)
+library(raster)
 
 # Packages for cluster analysis:
 library(NbClust)
@@ -34,9 +36,287 @@ library(ggdendro)
 ```
 
 ### Get data:
-
 ```{r}
+voles <- read_sf(dsn = here("data","redtreevoledata"), 
+                 layer = "ds033") %>% 
+  dplyr::select(COUNTY) %>% 
+  filter(COUNTY == "HUM") %>% 
+  st_transform(crs = 4326)
+
+# plot(voles)
+
+# Get Humboldt County outline
+humboldt <- read_sf(dsn = here("data","redtreevoledata"), 
+                    layer = "california_county_shape_file") %>% 
+  filter(NAME == "Humboldt") %>% 
+  dplyr::select(NAME)
+
+st_crs(humboldt) <- 4326
+
+# plot(humboldt)
+
+# Plot them together: 
+tm_shape(humboldt) +
+  tm_fill() +
+  tm_shape(voles) +
+  tm_dots(size = 0.2)
+
+# Or with ggplot2: 
+ggplot() +
+  geom_sf(data = humboldt) +
+  geom_sf(data = voles)
+  
+# Or save it:
+ggsave(here("figures","humvoles.png"),
+       units = "in", 
+       width = 4, 
+       height = 6, 
+       dpi = 300)
+
+# Another example (with tiff...there's also jpeg, png, etc.)
+
+# tiff("humvoles2.tiff", units = "in", width = 5, height = 5, res = 300)
+
+# Customize it however you want: 
+ggplot() +
+  geom_sf(data = humboldt, fill = "black") +
+  geom_sf(data = voles, color = "red", alpha = 0.5)
+
+# dev.off()
+
 
 ```
 
+We want to explore point patterns in a few different ways. Quadrat analysis, nearest neighbor analysis, etc. to compare with. 
+
+First we need to convert to 'ppp' and 'owin' - the points and windows, as used by maptools and spatstat (because sf is still catching up for raster and point pattern analysis stuff)...
+```{r}
+
+voles_sp <- as(voles,"Spatial")
+voles_ppp <- as(voles_sp, "ppp")
+
+humboldt_sp <- as(humboldt, "Spatial")
+humboldt_win <- as(humboldt_sp, "owin")
+
+voles_pb <- ppp(voles_ppp$x, voles_ppp$y, window = humboldt_win)
+
+plot(voles_pb)
+
+vole_qt <- quadrat.test(voles_pb, nx = 5, ny = 10) # nx and ny are number of columns/rows for the rectangles created 
+
+# Returns: VoleQT
+# Chi-squared test of CSR using quadrat counts
+
+# data:  VolePPP 
+# X-squared = 425.94, df = 45, p-value < 2.2e-16
+# alternative hypothesis: two.sided 
+# Reject the null hypothesis of spatial evenness! But we still don't know if more clustered or more uniform...
+
+plot(voles_pb)
+plot(vole_qt, add = TRUE, cex = 0.4)
+
+```
+
+Plot densities: 
+```{r}
+
+point_density <- density(voles_pb, sigma = 0.02)
+plot(point_density)
+
+# Can you start viewing this in tmap? Yes, rasterize it: 
+wgs84 = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+vole_raster <- raster(point_density, crs = wgs84)
+
+# Then plot: 
+tm_shape(vole_raster) +
+  tm_raster(midpoint = NA, 
+            palette = "Blues", 
+            legend.show = FALSE)
+
+```
+
+Nearest neighbor (G-function)
+```{r}
+r <- seq(0,0.15, by = 0.005)
+
+gfunction <- envelope(voles_pb, fun = Gest, r = r, nsim = 100, nrank = 2) # Sig level of Monte Carlo = 0.04
+
+plot(gfunction$obs ~ gfunction$r, type = "l", col = "black", lty = 11)
+lines(gfunction$hi ~ gfunction$r, type = "l", col = "blue", lty = 8)
+lines(gfunction$theo ~ gfunction$r, type = "l", col = "red", lty = 6)
+lines(gfunction$lo ~ gfunction$r, type = "l", col = "green", lty = 4)
+
+# Confirms, in combination with quadrat.test, clustered data!
+
+```
+
+Nearest Neighbor by Ripley's K (using L standardization)
+
+```{r}
+r2 <- seq(0,0.5, by = 0.05)
+
+lfunction <- envelope(voles_pb, fun = Lest, r = r2, nsim = 20, rank = 2, global = TRUE)
+
+plot(lfunction$obs ~ lfunction$r, type = "l", col = "black", lty = 11)
+lines(lfunction$hi ~ lfunction$r, type = "l", col = "blue", lty = 8)
+lines(lfunction$theo ~ lfunction$r, type = "l", col = "red", lty = 6)
+lines(lfunction$lo ~ lfunction$r, type = "l", col = "green", lty = 4)
+
+```
+
+Diggle-Cressie-Loosmore-Ford test of CSR
+```{r}
+
+DCLFTest <- dclf.test(voles_pb, nsim = 100, rank = 2) 
+DCLFTest
+
+```
+
+## Intro to cluster analysis (k-means, hierarchical)
+
+### k-means (partition-based)
+
+#### Part 1. K-means clustering: 
+Nevermind...back to irises dataset? 
+```{r}
+
+iris_nice <- iris %>% 
+  clean_names()
+
+ggplot(iris_nice) +
+  geom_point(aes(x = petal_length, y = petal_width, color = species))
+
+# How many clusters do you THINK there should be? 
+number_est <- NbClust(iris_nice[1:4], min.nc = 2, max.nc = 10, method = "kmeans")
+
+# By these estimators, 2 is the best number of clusters...but should that change our mind? Maybe...
+
+# What if we consider similarities across all four variables? 
+
+iris_km <- kmeans(iris_nice[1:4], 3) # kmeans specifying 3 groups!
+
+iris_km$size
+iris_km$centers
+iris_km$cluster
+
+# Bind the cluster number to the original data
+
+iris_cl <- data.frame(iris_nice, cluster_no = factor(iris_km$cluster))
+
+ggplot(iris_cl) +
+  geom_point(aes(x = sepal_length, y = sepal_width, color = cluster_no))
+```
+
+A little better...
+```{r}
+
+ggplot(iris_cl) +
+  geom_point(aes(x = petal_length, 
+                 y = petal_width, 
+                 color = cluster_no, 
+                 pch = species)) +
+  scale_color_brewer(palette = "Set2")
+
+```
+
+Make it 3D with plot_ly()...
+```{r}
+# Or, a 3D plot with plotly
+
+plot_ly(x = iris_cl$petal_length, 
+        y = iris_cl$petal_width, 
+        z = iris_cl$sepal_width, 
+        type = "scatter3d", 
+        color = iris_cl$cluster_no, 
+        symbol = ~iris_cl$species,
+        marker = list(size = 3),
+        colors = "Set1")
+```
+
+####Part 2. Cluster analysis: hierarchical
+
+Hierarchical cluster analysis (dendrograms) in R
+
+Relevant functions:
+
+stats::hclust() - agglomerative hierarchical clustering
+cluster::diana() - divisive hierarchical clustering
+
+We'll be using WorldBank environmental data (simplified), wb_env.csv
+```{r}
+
+# Get the data
+wb_env <- read_csv(here("data", "wb_env.csv"))
+
+# Only keep top 20 greenhouse gas emitters (for simplifying visualization here...)
+wb_ghg_20 <- wb_env %>% 
+  arrange(-ghg) %>% 
+  head(20)
+
+# Scale it (can consider this for k-means clustering, too...)
+wb_scaled <- as.data.frame(scale(wb_ghg_20[3:7]))
+
+# Update to add rownames (country name)
+rownames(wb_scaled) <- wb_ghg_20$name
+
+# Compute dissimilarity values (Euclidean distances):
+diss <- dist(wb_scaled, method = "euclidean")
+
+# Hierarchical clustering (complete linkage)
+hc_complete <- hclust(diss, method = "complete" )
+
+# Plot it (base plot):
+plot(hc_complete, cex = 0.6, hang = -1)
+
+```
+
+Divisive clustering:
+```{r}
+hc_div <- diana(diss)
+
+plot(hc_div, hang = -1)
+rect.hclust(hc_div, k = 4, border = 2:5)
+```
+
+We might want to compare those...because they differ slightly.
+```{r}
+
+# Convert to class dendrogram
+dend1 <- as.dendrogram(hc_complete)
+dend2 <- as.dendrogram(hc_div)
+
+# Combine into list
+dend_list <- dendlist(dend1,dend2)
+
+# Make a tanglegram
+tanglegram(dend1, dend2)
+
+# Convert to class 'dendro' for ggplotting
+data1 <- dendro_data(hc_complete)
+
+# Simple plot with ggdendrogram
+ggdendrogram(hc_complete, 
+             rotate = TRUE) +
+  theme_minimal() +
+  labs(x = "Country")
+
+# Want to do it actually in ggplot? Here: 
+label_data <- bind_cols(filter(segment(data1), x == xend & x%%1 == 0), label(data1))
+
+ggplot() + 
+geom_segment(data=segment(data1), aes(x=x, y=y, xend=xend, yend=yend)) +
+geom_text(data=label_data, aes(x=xend, y=yend, label=label, hjust=0), size=2) +
+coord_flip() + 
+scale_y_reverse(expand=c(0.2, 0)) +
+theme_bw() +
+theme(panel.border = element_blank(),
+      panel.grid.major = element_blank(), 
+      panel.grid.minor = element_blank(),
+      axis.line = element_blank(),
+      axis.title = element_blank(),
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      legend.position = "None") 
+
+```
 
