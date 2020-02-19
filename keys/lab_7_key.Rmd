@@ -1,0 +1,42 @@
+---
+title: "ESM 244 Winter 2020 - Lab 7"
+author: "Allison Horst"
+date: "2/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE)
+```
+
+### Get packages:
+```{r}
+# General packages for stuff
+library(tidyverse)
+library(janitor)
+library(plotly)
+
+# Packages for spatial stuff & point pattern analysis
+library(tmap)
+library(sf)
+library(spatstat)
+library(maptools)
+library(sp)
+
+# Packages for cluster analysis:
+library(NbClust)
+library(cluster)
+library(factoextra)
+library(dendextend)
+library(ggdendro)
+```
+
+### Get data:
+
+```{r}
+
+```
+
+
