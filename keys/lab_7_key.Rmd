@@ -91,9 +91,12 @@ We want to explore point patterns in a few different ways. Quadrat analysis, nea
 
 First we need to convert to 'ppp' and 'owin' - the points and windows, as used by maptools and spatstat (because sf is still catching up for raster and point pattern analysis stuff)...
 ```{r}
-
+## UPDATE!
 voles_sp <- as(voles,"Spatial")
 voles_ppp <- as(voles_sp, "ppp")
+
+# Breaks in 244 Winter 2020
+# Projection issue - switch to 6345 above and this works KIND OF -- but seems problematic. Need to fix for 244 Winter 2021!!! 
 
 humboldt_sp <- as(humboldt, "Spatial")
 humboldt_win <- as(humboldt_sp, "owin")
